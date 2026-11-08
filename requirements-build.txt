@@ -1,0 +1,2 @@
+# Only needed to build the desktop executable (python build_exe.py).
+pyinstaller>=6.10

@@ -1,0 +1,24 @@
+# Personal data: accounts, login sessions, timetables, study history. Never commit.
+data/
+sessions/
+
+# Downloaded at build/run time (python build_exe.py fetches it)
+models/*.task
+models/*.tflite
+
+# Build output
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

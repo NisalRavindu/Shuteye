@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention Monitor</title>
+<link rel="stylesheet" href="/static/timetable.css">
+<link rel="stylesheet" href="/static/day.css">
+<style>
+  :root {
+    --bg: #f5f5f2; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
+    --focused: #2f9e55; --away: #e8890c; --closed: #a84fc4; --absent: #d63b3b;
+    --calib: #2a7fd4; --paused: #8a8a85; --accent: #1d1d1b; --accent-text: #fff;
+    --restless: #b8860b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1f1f1d; --text: #ecebe6; --muted: #9a9993; --line: #33332f;
+      --focused: #4cc472; --away: #f5a33a; --closed: #c27ad9; --absent: #f06262;
+      --calib: #5aa5ef; --paused: #8a8a85; --accent: #ecebe6; --accent-text: #141413;
+      --restless: #e0b23a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  .sub { color: var(--muted); font-size: 13px; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); padding: 8px 14px; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+                   font-weight: 600; padding: 10px 22px; min-width: 150px; }
+  button.primary.stop { background: var(--absent); border-color: var(--absent); color: #fff; }
+  button.on { outline: 2px solid var(--calib); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+             margin: 0 0 12px; font-weight: 600; }
+  .video { position: relative; aspect-ratio: 4 / 3; background: #0d0d0c; border-radius: 10px; overflow: hidden;
+           border: 4px solid transparent; transition: border-color .2s; }
+  .video canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .video .placeholder[hidden], .camwarn[hidden] { display: none; }
+  .camwarn { margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+             border: 1px solid var(--away); color: var(--away); }
+  .video .placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: #8a8a85;
+                        text-align: center; padding: 20px; }
+  .video.alerting { animation: flash 0.7s steps(1) infinite; }
+  @keyframes flash { 50% { border-color: var(--absent); } }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .state { font-size: 28px; font-weight: 700; letter-spacing: .01em; }
+  .reason { color: var(--muted); min-height: 1.45em; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 12px 0 4px; }
+  .bar > div { height: 100%; width: 0; background: var(--muted); transition: width .25s linear; }
+  .barlabel { font-size: 12px; color: var(--muted); min-height: 1.4em; }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .side { display: flex; flex-direction: column; gap: 16px; }
+  label.row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
+              margin-bottom: 10px; font-size: 14px; }
+  label.row input[type=range] { grid-column: 1 / -1; width: 100%; }
+  label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; margin-bottom: 8px; }
+  output { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  fieldset { border: 0; padding: 0; margin: 0; }
+  fieldset:disabled { opacity: .55; }
+  ul.alerts { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
+  ul.alerts li { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  ul.alerts li time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 6px; }
+  .empty { color: var(--muted); font-size: 14px; }
+  pre.summary { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Consolas, monospace; margin: 0; }
+  .error { color: var(--absent); font-weight: 600; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  .head-actions { display: flex; gap: 8px; align-items: center; }
+  .iconbtn { display: inline-grid; place-items: center; width: 40px; height: 40px; padding: 0; border-radius: 10px; }
+  dialog#settingsdlg { width: min(560px, calc(100vw - 32px)); max-height: min(86vh, 900px); overflow: auto;
+                       background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px;
+                       padding: 18px 20px 20px; box-shadow: 0 20px 60px rgb(0 0 0 / .35); }
+  dialog#settingsdlg::backdrop { background: rgb(0 0 0 / .45); }
+  .dlg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .dlg-head h2 { margin: 0; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  .dlg-head .iconbtn { width: 34px; height: 34px; font-size: 15px; }
+  dialog h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+              margin: 18px 0 10px; font-weight: 600; }
+  .dlg-inline { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .dlg-inline .check { margin: 0; }
+  #settingslock:empty { display: none; }
+  #settingslock { margin-top: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  nav.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+                    padding: 8px 14px; color: var(--muted); font-weight: 600; }
+  nav.tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--text); }
+  .help { max-width: 820px; }
+  .help .card { margin-bottom: 16px; }
+  .help p, .help li { font-size: 15px; }
+  .help p { margin: 0 0 10px; }
+  .help ul { margin: 0; padding-left: 20px; }
+  .help li { margin-bottom: 6px; }
+  .help table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .help th, .help td { text-align: left; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .help th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .help td:first-child { white-space: nowrap; font-weight: 600; }
+  .help .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .tag { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  @media (max-width: 600px) { .help td:first-child { white-space: normal; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Attention Monitor</h1>
+      <div class="sub" id="sub">Off</div>
+    </div>
+    <div class="head-actions">
+      <button class="iconbtn" id="opensettings" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <button class="primary" id="toggle">Start day</button>
+    </div>
+  </header>
+
+  <dialog id="settingsdlg" aria-labelledby="settingstitle">
+    <div class="dlg-head">
+      <h2 id="settingstitle">Settings</h2>
+      <button class="iconbtn" id="closesettings" aria-label="Close settings">✕</button>
+    </div>
+
+    <h3>Sound &amp; notifications</h3>
+    <label class="row">Beep volume <output id="o_volume"></output>
+      <input type="range" id="volume" min="0" max="100" step="5" value="70"></label>
+    <div class="dlg-inline">
+      <button id="testbeep" type="button">Play test beep</button>
+      <label class="check"><input type="checkbox" id="sound" checked> Beep on alerts</label>
+    </div>
+    <label class="check"><input type="checkbox" id="notify"> Desktop notifications (even when this tab is in the background)</label>
+
+    <fieldset id="settings">
+      <div class="sub" id="settingslock"></div>
+      <h3>Calibration</h3>
+      <label class="check"><input type="checkbox" id="book_calibration" checked> I also look down at a book / paper (2 positions)</label>
+      <label class="check"><input type="checkbox" id="calibrate_eyes_closed" checked> Calibrate my closed eyes (close them between the beeps)</label>
+
+      <h3>When to alert</h3>
+      <label class="row">Looking away for <output id="o_away"></output>
+        <input type="range" id="away_grace_s" min="1" max="15" step="0.5" value="4"></label>
+      <label class="row">Eyes closed for <output id="o_closed"></output>
+        <input type="range" id="eyes_closed_grace_s" min="1" max="10" step="0.5" value="3"></label>
+      <label class="row">Away from the camera for <output id="o_absent"></output>
+        <input type="range" id="no_face_grace_s" min="1" max="30" step="1" value="5"></label>
+      <label class="row">Repeat the alert every <output id="o_repeat"></output>
+        <input type="range" id="repeat_alert_s" min="3" max="30" step="1" value="8"></label>
+
+      <h3>Wasted-time scoring</h3>
+      <label class="row">Don't count breaks shorter than <output id="o_mincount"></output>
+        <input type="range" id="min_counted_s" min="0" max="60" step="1" value="10"></label>
+      <label class="row">Restless alert after quick breaks <output id="o_restless"></output>
+        <input type="range" id="restless_count" min="2" max="10" step="1" value="4"></label>
+      <label class="row">Max gap between those quick breaks <output id="o_rgap"></output>
+        <input type="range" id="restless_gap_s" min="10" max="120" step="5" value="30"></label>
+
+      <details>
+        <summary>Sensitivity</summary>
+        <div style="margin-top:10px">
+          <label class="row">Head turn allowed <output id="o_yaw"></output>
+            <input type="range" id="yaw_tolerance_deg" min="5" max="50" step="1" value="20"></label>
+          <label class="row">Head tilt allowed <output id="o_pitch"></output>
+            <input type="range" id="pitch_tolerance_deg" min="5" max="45" step="1" value="15"></label>
+          <label class="row">Eyes-closed trigger point (lower = more sensitive) <output id="o_eyelevel"></output>
+            <input type="range" id="eye_closed_level" min="0.3" max="0.9" step="0.05" value="0.55"></label>
+          <label class="check"><input type="checkbox" id="use_gaze" checked> Track eye direction</label>
+        </div>
+      </details>
+      <div class="sub" style="margin-top:12px">Head-turn and tilt limits are margins around the positions you calibrate.</div>
+    </fieldset>
+
+    <div id="accountbox">
+    <h3>Account</h3>
+    <div class="dlg-inline">
+      <span>Signed in as <b id="whoami">…</b></span>
+      <button type="button" id="logout">Log out</button>
+    </div>
+    <details>
+      <summary>Change password</summary>
+      <form id="pwform" style="margin-top:10px">
+        <label class="row">Current password <input type="password" id="pw-old" autocomplete="current-password" style="grid-column:1/-1"></label>
+        <label class="row">New password (8+ characters) <input type="password" id="pw-new" autocomplete="new-password" style="grid-column:1/-1"></label>
+        <div class="dlg-inline"><button type="submit">Change password</button><span class="sub" id="pw-msg" role="status"></span></div>
+      </form>
+    </details>
+    </div>
+  </dialog>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tabbtn-monitor" aria-selected="true" data-tab="monitor">Monitor</button>
+    <button role="tab" id="tabbtn-timetable" aria-selected="false" data-tab="timetable">Timetable</button>
+    <button role="tab" id="tabbtn-analysis" aria-selected="false" data-tab="analysis">Analysis</button>
+    <button role="tab" id="tabbtn-help" aria-selected="false" data-tab="help">How it works</button>
+  </nav>
+
+  <section id="tab-timetable" hidden>
+    <div id="tt-root"></div>
+  </section>
+
+  <section id="tab-analysis" hidden>
+    <div id="an-root"></div>
+  </section>
+
+  <section id="tab-monitor">
+  <div class="card daycard" id="daycard">
+    <div class="day-top">
+      <div class="day-now">
+        <div class="day-kicker" id="day-kicker">Today</div>
+        <div class="day-title"><span class="day-dot" id="day-dot" hidden></span><span id="day-title">…</span></div>
+        <div class="day-time" id="day-time"></div>
+        <div class="bar day-bar" id="day-barwrap" hidden><div id="day-bar"></div></div>
+        <div class="day-next" id="day-next"></div>
+      </div>
+      <div class="day-actions">
+        <button id="day-break" hidden>Take a break</button>
+        <button id="day-resume" hidden>Resume monitoring</button>
+        <button id="day-view" hidden>View analysis</button>
+      </div>
+    </div>
+    <div class="day-tiles" id="day-tiles" hidden>
+      <div class="stat"><b id="dt-goal">0m</b><span>Planned so far</span></div>
+      <div class="stat"><b id="dt-studied">0m</b><span>Studied</span></div>
+      <div class="stat"><b id="dt-wasted">0m</b><span>Wasted</span></div>
+      <div class="stat"><b id="dt-short">0m</b><span>Missing</span></div>
+    </div>
+    <div class="day-suggest" id="day-suggest" hidden></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="video" id="video">
+        <canvas id="cam" aria-label="Your camera. The video stays on this computer."></canvas>
+        <div class="placeholder" id="placeholder">Camera off.</div>
+      </div>
+      <div class="controls">
+        <button id="quick" title="Monitor without the timetable">Quick session</button>
+        <button id="pause" disabled>Pause</button>
+        <button id="calib" disabled>Recalibrate</button>
+        <button id="mute" disabled>Mute</button>
+      </div>
+      <div class="camwarn" id="camwarn" hidden></div>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h2>Status</h2>
+        <div class="state" id="state">—</div>
+        <div class="reason" id="reason"></div>
+        <div class="bar"><div id="barfill"></div></div>
+        <div class="barlabel" id="barlabel"></div>
+        <div class="stats">
+          <div class="stat"><b id="focus">—</b><span>Focus</span></div>
+          <div class="stat"><b id="time">0:00</b><span>Session time</span></div>
+          <div class="stat"><b id="alerts">0</b><span>Alerts</span></div>
+          <div class="stat"><b id="distracted">0:00</b><span>Wasted time</span></div>
+        </div>
+        <div class="sub" id="ignored" style="margin-top:8px"></div>
+        <div class="sub" id="eyes"></div>
+      </div>
+
+      <div class="card">
+        <h2>Recent alerts</h2>
+        <ul class="alerts" id="alertlist"></ul>
+        <div class="empty" id="noalerts">None yet.</div>
+      </div>
+
+      <div class="card" id="summarycard" hidden>
+        <h2>Last session</h2>
+        <pre class="summary" id="summary"></pre>
+      </div>
+    </div>
+  </div>
+  </section>
+
+  <section id="tab-help" class="help" hidden>
+    <div class="card">
+      <h2>In short</h2>
+      <p>The monitor watches your face through the webcam and decides, many times a second, whether you're looking at your study material. If you look away, close your eyes or leave for longer than a short grace period, it beeps. At the end it tells you how much time was actually lost. Brief, harmless breaks aren't counted.</p>
+      <p>Numbers in <span class="v">bold</span> on this page are your current settings. Change them under the ⚙ <b>Settings</b> button at the top.</p>
+    </div>
+
+    <div class="card">
+      <h2>Study days</h2>
+      <ul>
+        <li><b>Start day</b> follows today's timetable: it shows the current subject, the time left in it and what's next. The camera only watches you during your subjects (and catch-up time). Breaks and free time aren't monitored.</li>
+        <li><b>Automatic breaks</b> (0–5 min, set in the Timetable toolbar) are taken from the end of a subject that's directly followed by another one. The next subject still starts on time. They aren't shown in the grid.</li>
+        <li><b>Take a break</b> whenever you like, for as long as you like. The camera switches off and it isn't counted as wasted, but the subject's clock keeps running, so it counts against today's goal.</li>
+        <li><b>Missing time</b> (wasted, own breaks, late start) is suggested back to you in today's free slots. Press <b>Start now</b> in a free slot to catch up on that subject.</li>
+        <li><b>The study day ends</b> at the time set in the Timetable toolbar (default 04:00 next morning), not at midnight, so a late session still counts for the day it started on. If you forget to end the day, or fall asleep, it closes automatically at that time, even if this app was closed in between. A planned day you never start counts as fully missed.</li>
+        <li>When a day ends, the <b>Analysis</b> tab opens with where the time went, per subject. Switch to <b>Week</b> for the whole week.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Calibration: 2 positions, about 12 seconds</h2>
+      <ul>
+        <li><b>Step 1:</b> look at your screen the way you normally study. After about 3 s you hear a <b>beep</b>: close your eyes and keep them closed until the <b>next beep</b>. You don't move, and the beeps tell you when, so you never need to read the screen with your eyes shut.</li>
+        <li><b>Step 2:</b> look down at your book or paper as if writing.</li>
+      </ul>
+      <p style="margin-top:10px">Everything later is compared to <i>you</i> in these positions. Any head position between screen and book, plus a margin, counts as focused. The closed-eye sample teaches it what your closed eyes look like, so it doesn't rely on a one-size-fits-all threshold. If you move the camera or your chair, press <b>Recalibrate</b>.</p>
+    </div>
+
+    <div class="card">
+      <h2>What it watches</h2>
+      <table>
+        <tr><th>Signal</th><th>How it's measured</th><th>Used to detect</th></tr>
+        <tr><td>Your face</td><td>A face-landmark model finds 478 points on your face in each frame.</td><td>Not at camera</td></tr>
+        <tr><td>Head angle</td><td>How far your head is turned left/right and tilted up/down, compared to the range between your two calibrated positions.</td><td>Looking away</td></tr>
+        <tr><td>Eye direction</td><td>Where your iris sits between the corners of your eye. <b>Sideways only</b>: up/down eye movement is normal when reading, so it's ignored.</td><td>Looking away (eyes drifting to the side while your head stays still)</td></tr>
+        <tr><td>Eyelids</td><td>Two signals combined: the model's blink score and the measured gap between your lids. Compared to your own open and closed eyes in each position, so lowered lids while writing don't count as closed.</td><td>Eyes closed</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>What triggers an alert</h2>
+      <table>
+        <tr><th>State</th><th>Means</th><th>Alert after</th></tr>
+        <tr><td><span class="tag" style="background:var(--away)"></span>Looking away</td>
+            <td>Head turned more than <span class="v" data-v="yaw_tolerance_deg">20</span>° or tilted more than <span class="v" data-v="pitch_tolerance_deg">15</span>° beyond your calibrated range, or eyes off to the side<span data-show="use_gaze"></span>.</td>
+            <td><span class="v" data-v="away_grace_s">4</span> s</td></tr>
+        <tr><td><span class="tag" style="background:var(--closed)"></span>Eyes closed</td>
+            <td>Eyes shut (eyes-closed score at or above 1.00, shown live on the Monitor tab). Normal blinks are far too short to count.</td>
+            <td><span class="v" data-v="eyes_closed_grace_s">3</span> s</td></tr>
+        <tr><td><span class="tag" style="background:var(--absent)"></span>Not at camera</td>
+            <td>No face found: you left, turned fully around, or something is covering your face.</td>
+            <td><span class="v" data-v="no_face_grace_s">5</span> s</td></tr>
+        <tr><td><span class="tag" style="background:var(--restless)"></span>Restless</td>
+            <td><span class="v" data-v="restless_count">4</span> quick breaks in a row, each starting within <span class="v" data-v="restless_gap_s">30</span> s of the previous one. This catches the in-out-in-out pattern of breaks that each stay just under the timers above.</td>
+            <td>at once</td></tr>
+      </table>
+      <p style="margin-top:10px">While you stay distracted it repeats the alert every <span class="v" data-v="repeat_alert_s">8</span> s. Each kind of alert has its own beep pattern, so you can tell them apart without looking.</p>
+    </div>
+
+    <div class="card">
+      <h2>What it forgives</h2>
+      <ul>
+        <li><b>Glances.</b> Anything shorter than the alert times above never alerts.</li>
+        <li><b>Flicker.</b> You must be back for 0.8 s before a break counts as over. Looking back for a split second doesn't reset the timer, and it doesn't split one break into many either.</li>
+        <li><b>Noise.</b> Breaks under 1 s are treated as detection noise and dropped completely.</li>
+        <li><b>Short isolated breaks</b> under <span class="v" data-v="min_counted_s">10</span> s (grabbing a pen, a stretch) are not counted as wasted time. They're listed separately as "ignored".</li>
+        <li><b>Breaks you take.</b> In a study day, press <b>Take a break</b>; in a quick session, <b>Pause</b>. That time isn't counted as wasted.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>How wasted time and focus % are scored</h2>
+      <ul>
+        <li>A break of <span class="v" data-v="min_counted_s">10</span> s or more counts as wasted, in full.</li>
+        <li>A shorter break counts <b>only</b> if it's part of a restless spell. Then every break in that spell counts.</li>
+        <li><b>Focus %</b> = 100% − wasted time ÷ tracked time. Calibration and paused time aren't tracked.</li>
+        <li>A CSV log of every alert and break is saved in the <code>sessions</code> folder.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>What it's sensitive to</h2>
+      <ul>
+        <li><b>Lighting.</b> A dim room or a bright window behind you can make it lose your face (counted as "not at camera") and makes eye readings noisy. Light from the front works best.</li>
+        <li><b>Glasses.</b> Screen glare on lenses can hide your eyes. If you get false eyes-closed or "eyes looking left/right" alerts, recalibrate, or turn off <i>Track eye direction</i> under Sensitivity.</li>
+        <li><b>Covering your face.</b> Hair over your eyes, a cap, or resting your chin or cheek on your hand can hide landmarks.</li>
+        <li><b>Moving after calibration.</b> Moving the laptop, camera or chair, or leaning far back, shifts all the angles. Press <b>Recalibrate</b>.</li>
+        <li><b>Material outside the calibrated range.</b> A second monitor or notes off to the side will count as looking away. Raise <i>Head turn allowed</i>.</li>
+        <li><b>Other people.</b> It follows one face. Someone else walking through the frame can briefly confuse it.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>What it can't tell</h2>
+      <ul>
+        <li>Whether your <b>mind</b> is on the material. Daydreaming while staring at your book looks focused.</li>
+        <li><b>What's on your screen.</b> Notes and a video look the same from the camera.</li>
+        <li>Listening to a lecture with your eyes closed counts as <b>eyes closed</b>. Pause it for that.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Privacy</h2>
+      <p>Everything runs on this computer. The video is never recorded or sent anywhere, and the page is only reachable from this machine. The session log contains only times and event types, no images.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = { focused: "--focused", looking_away: "--away", eyes_closed: "--closed",
+                 no_face: "--absent", calibrating: "--calib", paused: "--paused",
+                 restless: "--restless" };
+const color = (state) => `var(${COLORS[state] || "--muted"})`;
+const clock = (s) => { s = Math.max(0, Math.round(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); };
+
+let running = false, lastAlertCount = 0, busy = false;
+
+const sliders = { away_grace_s: ["o_away", "s"], eyes_closed_grace_s: ["o_closed", "s"],
+  no_face_grace_s: ["o_absent", "s"], yaw_tolerance_deg: ["o_yaw", "°"],
+  pitch_tolerance_deg: ["o_pitch", "°"], repeat_alert_s: ["o_repeat", "s"],
+  volume: ["o_volume", "%"], min_counted_s: ["o_mincount", "s"],
+  restless_count: ["o_restless", ""], restless_gap_s: ["o_rgap", "s"],
+  eye_closed_level: ["o_eyelevel", ""] };
+const CHECKS = ["use_gaze", "sound", "book_calibration", "calibrate_eyes_closed"];
+for (const [id, [out, unit]] of Object.entries(sliders)) {
+  const upd = () => { $(out).textContent = $(id).value + unit; };
+  $(id).addEventListener("input", upd); upd();
+}
+// Settings are saved on the server (data/settings.json), not in this browser.
+let settingsLoaded = false, saveTimer = null;
+function settings() {
+  const s = {};
+  for (const id of Object.keys(sliders)) s[id] = Number($(id).value);
+  for (const id of CHECKS) s[id] = $(id).checked;
+  s.notify = $("notify").checked;
+  return s;
+}
+function saveSettings() {
+  if (!settingsLoaded) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => api("/api/settings", settings()).catch(() => {}), 400);
+}
+async function loadSettings() {
+  try {
+    const saved = await api("/api/settings");
+    for (const [k, v] of Object.entries(saved)) {
+      const el = $(k);
+      if (!el || el.tagName !== "INPUT") continue;
+      if (el.type === "checkbox") el.checked = !!v;
+      else { el.value = v; el.dispatchEvent(new Event("input")); }
+    }
+    if ($("notify").checked && !("Notification" in window && Notification.permission === "granted")) $("notify").checked = false;
+  } catch {}
+  settingsLoaded = true;
+  if (typeof syncHelp === "function") syncHelp();
+}
+document.querySelectorAll("#settingsdlg input:not([type=password])").forEach((el) => el.addEventListener("change", saveSettings));
+loadSettings();
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+$("quick").onclick = async () => {
+  if (busy) return; busy = true; $("quick").disabled = true;
+  try { render(await api(running ? "/api/stop" : "/api/start", running ? {} : settings())); }
+  finally { busy = false; $("quick").disabled = false; }
+};
+// Header button: start / end the study day (handled in day.js)
+window.monitorSettings = settings;
+$("pause").onclick = () => api("/api/command", { name: "toggle_pause" }).then(render);
+$("calib").onclick = () => api("/api/command", { name: "calibrate" }).then(render);
+$("mute").onclick = () => api("/api/command", { name: "toggle_mute" }).then(render);
+$("notify").onchange = async (e) => {
+  if (e.target.checked && "Notification" in window && Notification.permission !== "granted") {
+    if (await Notification.requestPermission() !== "granted") e.target.checked = false;
+  }
+};
+
+function render(s) {
+  running = s.running;
+  const q = $("quick");
+  q.hidden = !!s.day_mode;
+  q.textContent = running ? "Stop quick session" : "Quick session";
+  $("settings").disabled = running;
+  $("settingslock").textContent = running
+    ? "A session is running, so the settings below are locked. They'll apply from the next session. Sound settings above work right away." : "";
+  $("pause").hidden = !!s.day_mode;            // during a study day, use "Take a break"
+  for (const id of ["pause", "calib", "mute"]) $(id).disabled = !running || !s.receiving || !!s.camera_off;
+  $("pause").textContent = s.paused ? "Resume" : "Pause";
+  $("pause").classList.toggle("on", !!s.paused);
+  $("mute").textContent = s.muted ? "Unmute" : "Mute";
+  $("mute").classList.toggle("on", !!s.muted);
+
+  // camera: runs in this browser (camera.js); it decides from the status whether to be on
+  if (window.cam) window.cam.sync(s); else window.__pendingStatus = s;
+  $("video").classList.toggle("alerting", running && !!s.alerting);
+
+  // status
+  if (running && s.state) {
+    $("state").textContent = s.label; $("state").style.color = color(s.state);
+    $("reason").textContent = s.reason;
+    let frac = 0, label = "";
+    if (s.state === "calibrating") { frac = s.calibration_progress; label = "Calibrating your study postures. Hold still in each one."; }
+    else if (s.distracted_for > 0 && s.grace_s > 0) {
+      frac = Math.min(s.distracted_for / s.grace_s, 1);
+      label = s.alerting ? `Distracted for ${clock(s.distracted_for)}` : `Alert in ${Math.max(0, s.grace_s - s.distracted_for).toFixed(1)}s`;
+    }
+    $("barfill").style.width = (frac * 100) + "%";
+    $("barfill").style.background = color(s.state === "focused" && s.distracted_for > 0 ? "looking_away" : s.state);
+    $("barlabel").textContent = label;
+    $("focus").textContent = s.tracked_s > 0 ? Math.round(s.focus * 100) + "%" : "—";
+    $("time").textContent = clock(s.uptime_s);
+    $("alerts").textContent = s.alerts;
+    $("distracted").textContent = clock(s.wasted_s);
+    $("ignored").textContent = (s.ignored ? `Ignored ${s.ignored} brief break${s.ignored > 1 ? "s" : ""} under ${s.min_counted_s}s (${clock(s.ignored_s)}). ` : "")
+      + (s.restless_spells ? `${s.restless_spells} restless spell${s.restless_spells > 1 ? "s" : ""} counted in full.` : "");
+    $("eyes").textContent = s.state === "calibrating" ? "" : `Eyes-closed score: ${(s.closedness || 0).toFixed(2)} (counts as closed at 1.00)`;
+    $("sub").textContent = s.day_mode ? "Study day running" : s.paused ? "Paused" : "Quick session running";
+    document.title = s.alerting ? "⚠ " + s.label + " · Attention Monitor" : "Attention Monitor";
+  } else {
+    $("state").textContent = running ? "Starting…" : "Off"; $("state").style.color = "";
+    $("reason").textContent = running ? "Opening camera and loading the face model" : "";
+    $("barfill").style.width = "0"; $("barlabel").textContent = ""; $("ignored").textContent = ""; $("eyes").textContent = "";
+    $("sub").textContent = running ? "Starting…" : "Off";
+    document.title = "Attention Monitor";
+  }
+
+  // alerts
+  const list = s.recent_alerts || [];
+  $("alertlist").innerHTML = list.map(a =>
+    `<li><span class="dot" style="background:${color(a.issue)}"></span><time>${a.time}</time><span>${esc(a.reason)}</span></li>`).join("");
+  $("noalerts").hidden = list.length > 0;
+  const count = s.alerts || 0;
+  if (running && count > lastAlertCount && list[0] && $("notify").checked && Notification.permission === "granted") {
+    new Notification("Attention Monitor: " + list[0].label, { body: list[0].reason, tag: "attention" });
+  }
+  lastAlertCount = running ? count : 0;
+
+  $("summarycard").hidden = !s.summary || running;
+  $("summary").textContent = s.summary || "";
+}
+const esc = (x) => String(x).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---- account ----
+// Any API call that comes back "not logged in" sends you to the login page.
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const r = await _fetch(...args);
+  const url = String(args[0] && args[0].url || args[0]);
+  if (r.status === 401 && url.includes("/api/") && !url.includes("/api/auth/")) location.replace("/login");
+  return r;
+};
+_fetch("/api/auth/info", { cache: "no-store" }).then((r) => r.json()).then((i) => {
+  if (i.local) { $("accountbox").hidden = true; return; }      // desktop app: no accounts
+  if (!i.user) location.replace("/login"); else $("whoami").textContent = i.user;
+}).catch(() => {});
+$("logout").onclick = async () => {
+  if (running && !confirm("A session is running. Log out anyway? It keeps running on the server, but nothing is monitored until you sign in again.")) return;
+  await _fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  location.replace("/login");
+};
+$("pwform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await _fetch("/api/auth/password", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ old: $("pw-old").value, new: $("pw-new").value }) });
+  const d = await r.json().catch(() => ({}));
+  $("pw-msg").textContent = d.ok ? "Password changed. Other devices were signed out." : (d.error || "Couldn't change it.");
+  if (d.ok) { $("pw-old").value = $("pw-new").value = ""; }
+});
+
+// ---- settings dialog ----
+const dlg = $("settingsdlg");
+$("opensettings").onclick = () => dlg.showModal();
+$("closesettings").onclick = () => dlg.close();
+dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // click the backdrop to close
+
+// Beeps play in this browser at the chosen volume (camera.js).
+const preview = () => window.cam && window.cam.beep("looking_away");
+$("volume").addEventListener("change", preview);          // preview when you let go
+$("testbeep").onclick = preview;
+$("sound").addEventListener("change", () => {
+  if (running) api("/api/command", { name: $("sound").checked ? "unmute" : "mute" }).then(render);
+});
+
+// ---- tabs ----
+function showTab(name) {
+  for (const t of ["monitor", "timetable", "analysis", "help"]) {
+    $("tab-" + t).hidden = t !== name;
+    $("tabbtn-" + t).setAttribute("aria-selected", String(t === name));
+  }
+  try { localStorage.setItem("am-tab", name); } catch {}
+  document.dispatchEvent(new CustomEvent("tabshown", { detail: name }));
+}
+document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+try { const t = localStorage.getItem("am-tab"); if (["help", "timetable", "analysis"].includes(t)) showTab(t); } catch {}
+
+// Live setting values inside the help text
+function syncHelp() {
+  document.querySelectorAll("[data-v]").forEach(el => { const src = $(el.dataset.v); if (src) el.textContent = src.value; });
+  document.querySelectorAll("[data-show=use_gaze]").forEach(el => {
+    el.textContent = $("use_gaze").checked ? "" : " (eye direction is currently turned off)"; });
+}
+document.querySelectorAll("#settings input").forEach(el => el.addEventListener("input", syncHelp));
+syncHelp();
+
+async function poll() {
+  try { render(await api("/api/status")); } catch { $("sub").textContent = "Server not reachable"; }
+  setTimeout(poll, 300);
+}
+poll();
+</script>
+<script src="/static/timetable.js"></script>
+<script src="/static/day.js"></script>
+<script src="/static/analysis.js"></script>
+<script type="module" src="/static/camera.js"></script>
+</body>
+</html>

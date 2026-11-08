@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Attention Monitor</title>
+<style>
+  :root { --bg: #f5f5f2; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
+          --accent: #1d1d1b; --accent-text: #fff; --error: #d63b3b; --focus: #2a7fd4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141413; --panel: #1f1f1d; --text: #ecebe6; --muted: #9a9993; --line: #33332f;
+            --accent: #ecebe6; --accent-text: #141413; --error: #f06262; --focus: #5aa5ef; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px; }
+  .card { width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 26px 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+  .tabs { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 18px; }
+  .tabs button { flex: 1; border: 0; background: none; color: var(--muted); padding: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+  .tabs button[aria-pressed=true] { background: var(--accent); color: var(--accent-text); }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
+  input { width: 100%; font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+          background: var(--bg); color: var(--text); }
+  input:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  button.primary { width: 100%; margin-top: 20px; padding: 11px; border: 0; border-radius: 9px; font: inherit; font-weight: 650;
+                   background: var(--accent); color: var(--accent-text); cursor: pointer; }
+  button.primary:disabled { opacity: .6; cursor: wait; }
+  .error { color: var(--error); font-size: 14px; margin-top: 12px; min-height: 1.4em; }
+  .note { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin-bottom: 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Attention Monitor</h1>
+    <p class="sub" id="sub">Sign in to your study space.</p>
+
+    <div class="tabs" id="tabs" role="group" aria-label="Sign in or create an account">
+      <button type="button" data-mode="login" aria-pressed="true">Sign in</button>
+      <button type="button" data-mode="register" aria-pressed="false">Create account</button>
+    </div>
+
+    <div class="note" id="firstnote" hidden>No accounts exist yet. The first account is the <b>owner</b>, and any timetable and history already on this computer move into it.</div>
+    <div class="note" id="closednote" hidden>Sign-ups are closed. Ask the owner for an invite code.</div>
+
+    <form id="form" novalidate>
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <div class="hint" id="userhint" hidden>3–32 characters: lowercase letters, numbers, - or _</div>
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <div class="hint" id="passhint" hidden>At least 8 characters.</div>
+
+      <div id="invitebox" hidden>
+        <label for="invite">Invite code</label>
+        <input id="invite" name="invite" autocomplete="off" spellcheck="false">
+      </div>
+
+      <button class="primary" id="submit" type="submit">Sign in</button>
+      <div class="error" id="error" role="alert"></div>
+    </form>
+  </main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let mode = "login", info = { first_user: false, registration_open: false, invite_required: true };
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === m)));
+  const reg = m === "register";
+  $("submit").textContent = reg ? (info.first_user ? "Create owner account" : "Create account") : "Sign in";
+  $("password").autocomplete = reg ? "new-password" : "current-password";
+  $("userhint").hidden = $("passhint").hidden = !reg;
+  $("invitebox").hidden = !(reg && info.invite_required);
+  $("firstnote").hidden = !(reg && info.first_user);
+  $("closednote").hidden = !(reg && !info.registration_open);
+  $("submit").disabled = reg && !info.registration_open;
+  $("error").textContent = "";
+}
+
+document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => setMode(b.dataset.mode));
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("error").textContent = "";
+  $("submit").disabled = true;
+  const body = { username: $("username").value.trim().toLowerCase(), password: $("password").value };
+  if (mode === "register") body.invite = $("invite").value.trim();
+  try {
+    const r = await fetch(mode === "register" ? "/api/auth/register" : "/api/auth/login",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (r.ok && d.ok) { location.replace("/"); return; }
+    $("error").textContent = d.error || "Something went wrong. Try again.";
+  } catch {
+    $("error").textContent = "Can't reach the server.";
+  }
+  $("submit").disabled = false;
+});
+
+(async () => {
+  try {
+    info = await (await fetch("/api/auth/info", { cache: "no-store" })).json();
+    if (info.user) { location.replace("/"); return; }
+  } catch {}
+  if (info.first_user) $("sub").textContent = "Set up the first account to get started.";
+  setMode(info.first_user ? "register" : "login");
+  $("username").focus();
+})();
+</script>
+</body>
+</html>
